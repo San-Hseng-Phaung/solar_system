@@ -1,157 +1,103 @@
-import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:o3d/o3d.dart';
-import 'package:solar_system/planet-info.dart';
-import 'package:solar_system/planet.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:solar_system/database/insert_questions.dart';
+import 'package:solar_system/screen/moons_screen.dart';
+import 'package:solar_system/screen/solar_system.dart';
+import 'package:solar_system/screen/spacemissions_screen.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
+// import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-void main() {
-  runApp(SolarSystemApp());
-}
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized(); // ✅ Moved here
 
-class SolarSystemApp extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: SolarSystemPage()
-    );
+  if (kIsWeb) {
+    // ✅ Web: Use `sqflite_common_ffi_web`
+    debugPrint("Using Web Database");
+    databaseFactory = databaseFactoryFfiWeb;
+  } else {
+    // ✅ Mobile (Android/iOS): Use default `sqflite` (NO `ffi`)
+    debugPrint("Using Mobile Database");
+    databaseFactory = databaseFactory; // Default `sqflite`
   }
+
+  runApp(const SolarSystemApp());
 }
 
-class SolarSystemPage extends StatefulWidget {
+class SolarSystemApp extends StatefulWidget {
+  const SolarSystemApp({super.key});
+
   @override
-  _SolarSystemPageState createState() => _SolarSystemPageState();
+  State<SolarSystemApp> createState() => _SolarSystemAppState();
 }
 
-class _SolarSystemPageState extends State<SolarSystemPage> {
-
-  Map<String, double> angles = {};
+class _SolarSystemAppState extends State<SolarSystemApp> {
+  int _selectedIndex = 0; // Current index of BottomNavigationBar
 
   @override
   void initState() {
     super.initState();
-    for (var planet in planetData) {
-      angles[planet.planetName] = 0;
-    }
-    _startAnimation();
+    _checkAndInsertQuestions(); // ✅ Call only once
   }
 
-  void _startAnimation() {
-    Future.doWhile(() async {
-      setState(() {
-         for (var planet in planetData) {
-          angles[planet.planetName] =
-              (angles[planet.planetName]! + planet.orbitSpeeds) % (2 * pi);
-        }
-      });
-      await Future.delayed(Duration(milliseconds: 16)); // ~60 FPS
-      return true;
+  Future<void> _checkAndInsertQuestions() async {
+    final prefs = await SharedPreferences.getInstance();
+    bool isInserted = prefs.getBool('questionsInserted') ?? false;
+
+    if (!isInserted) {
+      await InsertQuestions.insertSampleQuestions(); // ✅ Insert only once
+      await prefs.setBool('questionsInserted', true);
+      debugPrint("Questions inserted successfully!");
+    } else {
+      debugPrint("Questions already inserted.");
+    }
+  }
+
+  // List of widgets corresponding to the sections
+  final List<Widget> _widgetOptions = <Widget>[
+    SolarSystemPage(),
+    MoonsScreen(),
+    SpaceMissionsScreen(),
+  ];
+
+  // Function to handle item taps
+  void _onItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: DecoratedBox(
-          decoration: BoxDecoration(
-            image: DecorationImage(
-                image: AssetImage("assets/images/galaxy.jpg"), fit: BoxFit.cover),
-          ),
-        child: Stack(
-          children: [
-            // Orbit Lines
-            for (var planet in planetData)
-              CustomPaint(
-                painter: OrbitPainter(planet.orbitRadius),
-                size: MediaQuery.of(context).size,
-              ),
-            // Planets
-            for (var planet in planetData)
-              Positioned(
-                left: MediaQuery.of(context).size.width / 2 +
-                    planet.orbitRadius * cos(angles[planet.planetName]!) -
-                    planet.planetSizes / 2,
-                top: MediaQuery.of(context).size.height / 2 +
-                    planet.orbitRadius * sin(angles[planet.planetName]!) -
-                    planet.planetSizes / 2,
-                child: GestureDetector(
-                  onTap: () => _showPlanetInfo(planet),
-                  child: Image.asset(
-                    planet.planetImg,
-                    width: planet.planetSizes,
-                    height: planet.planetSizes,
-                    
-                  ),
-                ),
-              ),
-            // Sun
-            Positioned(
-              left: MediaQuery.of(context).size.width / 2 - sunData.planetSizes / 2,
-              top: MediaQuery.of(context).size.height / 2 - sunData.planetSizes / 2,
-              child: GestureDetector(
-                onTap: () => _showPlanetInfo(sunData),
-                child: Image.asset(
-                  sunData.planetImg,
-                  width:sunData.planetSizes,
-                  height: sunData.planetSizes,
-                ),)
-        
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: _widgetOptions[_selectedIndex], // Display selected screen
+        bottomNavigationBar: BottomNavigationBar(
+          unselectedItemColor: Colors.grey,
+          backgroundColor: Colors.black,
+          currentIndex: _selectedIndex,
+          onTap: _onItemTapped,
+          items: const [
+            BottomNavigationBarItem(
+              icon:  ImageIcon(
+              AssetImage('assets/images/planet_icon.png'), 
+              size: 30,
+            ),
+              label: 'Planets',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.circle),
+              label: 'Moons',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.rocket_rounded),
+              label: 'Space Missions',
             ),
           ],
         ),
       ),
     );
   }
-
-  void _showPlanetInfo(Planet planet) {
-    // Navigator.push(
-    //   context,
-    //   MaterialPageRoute(
-    //     builder: (_) => PlanetInfoPage(
-    //       planetName: planetName,
-    //       planetInfo: planetInfo[planetName] ?? "Information not available",
-    //       modelPath: planetModels[planetName]!,
-    //     ),
-    //   ),
-    // );
-
-    Navigator.push(
-      context,
-      PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 800),
-        pageBuilder: (context, animation, secondaryAnimation) {
-          return FadeTransition(
-            opacity: animation,
-            child:  PlanetInfo(
-          planet: planet,
-        ),
-          );
-        },
-      ),
-    );
-  }
 }
-
-class OrbitPainter extends CustomPainter {
-  final double radius;
-
-  OrbitPainter(this.radius);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white.withOpacity(0.5)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.5; // Reduced thickness
-    canvas.drawCircle(
-      Offset(size.width / 2, size.height / 2),
-      radius,
-      paint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-
